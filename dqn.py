@@ -50,7 +50,7 @@ class DQNAgent(object):
     self._losses = collections.deque(maxlen=100)
     self._grad_norms = collections.deque(maxlen=100)
 
-  def update(self, experience):
+  def update(self, experience, random_experience=None):
     """Updates agent on this experience.
 
     Args:
@@ -63,7 +63,7 @@ class DQNAgent(object):
         experiences = self._replay_buffer.sample(self._batch_size)
 
         self._optimizer.zero_grad()
-        loss = self._dqn.loss(experiences, np.ones(self._batch_size))
+        loss = self._dqn.loss(experiences, np.ones(self._batch_size), random_experience)
         loss.backward()
         self._losses.append(loss.item())
 
@@ -225,7 +225,7 @@ class DQNPolicy(nn.Module):
     self._min_q.append(torch.min(q_values).item())
     return epsilon_greedy(q_values, epsilon)[0], None
 
-  def loss(self, experiences, weights):
+  def loss(self, experiences, weights, random_experiences=None):
     """Updates parameters from a batch of experiences
 
     Minimizing the loss:
@@ -254,6 +254,7 @@ class DQNPolicy(nn.Module):
     weights = torch.tensor(weights).float()
 
     # TODO(evzliu): Could more gracefully incorporate aux_losses
+    # equation (2) in paper? with aux_losses as Information bottleneck?
     current_state_q_values, aux_losses = self._Q(states, None)
     if isinstance(aux_losses, dict):
       for name, loss in aux_losses.items():
@@ -316,7 +317,7 @@ class DQNPolicy(nn.Module):
 class RecurrentDQNPolicy(DQNPolicy):
   """Implements a DQN policy that uses an RNN on the observations."""
 
-  def loss(self, experiences, weights):
+  def loss(self, experiences, weights, random_experiences=None):
     """Updates recurrent parameters from a batch of sequential experiences
 
     Minimizing the DQN loss:
@@ -357,10 +358,14 @@ class RecurrentDQNPolicy(DQNPolicy):
       # (batch_size, max_seq_len)
       indices = torch.tensor(
           [[e.index for e in seq] for seq in experiences]).long()
+      
+      random_trajectories = None
+      if random_experiences is not None:
+        random_trajectories = [seq[0].trajectory for seq in random_experiences]
 
       # (batch_size * max_trajectory_len)
       rewards = self._reward_relabeler.label_rewards(
-          trajectories)[0].gather(-1, indices).reshape(-1)
+          trajectories, random_trajectories)[0].gather(-1, indices).reshape(-1)
 
     # (batch_size,) 1 if was not done, otherwise 0
     not_done_mask = ~(torch.tensor(
@@ -375,6 +380,8 @@ class RecurrentDQNPolicy(DQNPolicy):
     current_state_q_values = current_q_values.gather(1, actions.unsqueeze(1))
 
     # TODO(evzliu): Could more gracefully incorporate aux_losses
+    # Hence, we maximize this by training the exploration policy on rewards set to be the information gain
+    # Equation (5) ?
     aux_losses = {}
     if hasattr(self._Q._state_embedder, "aux_loss"):
       aux_losses = self._Q._state_embedder.aux_loss(unpadded_experiences)

@@ -206,6 +206,10 @@ def main():
   exploration_config = config.get("exploration_agent")
   exploration_agent = get_exploration_agent(exploration_config, exploration_env)
 
+  # GAN noisy trajectory generation agent
+  # random_exploration_config = config.get("random_agent")
+  # random_exploration_agent = get_exploration_agent(random_exploration_config, exploration_env)
+
   # Should probably expose this more gracefully
   trajectory_embedder = (
       instruction_agent._dqn._Q._state_embedder._trajectory_embedder)
@@ -226,6 +230,18 @@ def main():
   exploration_steps = 0
   instruction_steps = 0
   for step in tqdm.tqdm(range(1000000)):
+    # # GAN random agent noise generator
+    # # TODO: this will increase the steps
+    # random_env = create_env(step)
+    # random_episode, _ = run_episode(
+    #     # Exploration episode gets ignored
+    #     env_class.instruction_wrapper()(
+    #         random_env, [], seed=max(0, step - 1)),
+    #     random_exploration_agent)
+    # random_experiences = []
+    # for index, exp in enumerate(random_episode):
+    #     random_experiences.append(relabel.TrajectoryExperience(exp, random_episode, index))
+
     exploration_env = create_env(step)
     exploration_episode, _ = run_episode(
         # Exploration episode gets ignored
