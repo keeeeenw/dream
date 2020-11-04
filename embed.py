@@ -252,8 +252,8 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     transition_context_loss = (
         (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
          all_transition_contexts).detach()) ** 2).sum(-1)
-    # transition_context_loss = (
-    #     transition_context_loss * mask).sum() / mask.sum()
+    transition_context_loss = (
+        transition_context_loss * mask).sum() / mask.sum()
 
     # GAN implemenation
     # Option 1
@@ -298,19 +298,19 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     true_labels = torch.tensor(true_labels).float()[:,None]
     # transition_contexts torch.Size([1, 64])
     # self._generator_optimizer.zero_grad()
-    generator_discriminator_out = self._discriminator(transition_contexts)
+    # generator_discriminator_out = self._discriminator(transition_contexts)
     # TODO: all_transition_contexts torch.Size([1, 3, 64]) we need to expand the input of discriminator
     # generator_discriminator_out = self._discriminator(all_transition_contexts)
     # TODO: improve discriminator to use softmax?
-    transition_context_loss = self._gan_loss(generator_discriminator_out, true_labels)
+    # transition_context_loss = self._gan_loss(generator_discriminator_out, true_labels)
     # TODO: do we need to invert the labels because we are not generating noise?
     # "The generator should be trying to fool the discriminator so when the discriminator
     # makes a mistake and says the generated output is real (predicts 1) then the gradients
     # should be small, when the discriminator acts correctly and predicts that the output is
     # generated (predicts 0) the gradients should be big."
-    transition_context_loss += self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
+    # transition_context_loss += self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
     # This loss by itself is too big?
-    transition_context_loss = (transition_context_loss * mask).sum() / mask.sum()
+    # transition_context_loss = (transition_context_loss * mask).sum() / mask.sum()
     # TODO: remove retain_graph here
     # transition_context_loss.backward(retain_graph=True)
     # self._generator_optimizer.step()
