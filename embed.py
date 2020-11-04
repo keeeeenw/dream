@@ -145,11 +145,11 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
 
     self._discriminator = Discriminator(transition_embedder.embed_dim)
     self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.0001)
-    gen_params = list(self._transition_embedder.parameters()) + \
-      list(self._transition_lstm.parameters()) + \
-      list(self._transition_fc_layer.parameters()) + \
-      list(self._transition_output_layer.parameters())
-    self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.0001)
+    # gen_params = list(self._transition_embedder.parameters()) + \
+    #   list(self._transition_lstm.parameters()) + \
+    #   list(self._transition_fc_layer.parameters()) + \
+    #   list(self._transition_output_layer.parameters())
+    # self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.0001)
     self._random_trajectories = None
     self._gan_loss = nn.BCELoss()
 
@@ -249,9 +249,9 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # variance N(μω(τexp),σ2I), this loss reduces to an l2 regression of z on μω(τexp)
     # all_transition_contexts -> trajectory embedding
     # id_contexts -> task encoding
-    # transition_context_loss = (
-    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-    #      all_transition_contexts).detach()) ** 2).sum(-1)
+    transition_context_loss = (
+        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+         all_transition_contexts).detach()) ** 2).sum(-1)
     # transition_context_loss = (
     #     transition_context_loss * mask).sum() / mask.sum()
 
@@ -290,57 +290,51 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # noise = self._random_trajectories
     # id_contexts, _, generated_data, _ = (self._compute_contexts(noise))
 
-    if not self._use_ids:
-      # Train the generator
-      #   torch.tensor([traj[0].state.env_id for traj in trajectories_tmp])) # come from Fψ(u)
-      # TODO: is id_contexts the true label though because we are also training F.
-      true_data = id_contexts.detach() # come from Fψ(u)
-      true_labels = [1] * batch_size
-      true_labels = torch.tensor(true_labels).float()[:,None]
-      # transition_contexts torch.Size([1, 64])
-      self._generator_optimizer.zero_grad()
-      generator_discriminator_out = self._discriminator(transition_contexts)
-      # TODO: all_transition_contexts torch.Size([1, 3, 64]) we need to expand the input of discriminator
-      # generator_discriminator_out = self._discriminator(all_transition_contexts)
-      # TODO: improve discriminator to use softmax?
-      transition_context_loss = self._gan_loss(generator_discriminator_out, true_labels)
-      # TODO: do we need to invert the labels because we are not generating noise?
-      # "The generator should be trying to fool the discriminator so when the discriminator
-      # makes a mistake and says the generated output is real (predicts 1) then the gradients
-      # should be small, when the discriminator acts correctly and predicts that the output is
-      # generated (predicts 0) the gradients should be big."
-      # transition_context_loss = self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
-      # This loss by itself is too big?
-      transition_context_loss = (transition_context_loss * mask).sum() / mask.sum()
-      # TODO: remove retain_graph here
-      transition_context_loss.backward(retain_graph=True)
-      self._generator_optimizer.step()
+    # Train the generator
+    #   torch.tensor([traj[0].state.env_id for traj in trajectories_tmp])) # come from Fψ(u)
+    # TODO: is id_contexts the true label though because we are also training F.
+    true_data = id_contexts.detach() # come from Fψ(u)
+    true_labels = [1] * batch_size
+    true_labels = torch.tensor(true_labels).float()[:,None]
+    # transition_contexts torch.Size([1, 64])
+    # self._generator_optimizer.zero_grad()
+    generator_discriminator_out = self._discriminator(transition_contexts)
+    # TODO: all_transition_contexts torch.Size([1, 3, 64]) we need to expand the input of discriminator
+    # generator_discriminator_out = self._discriminator(all_transition_contexts)
+    # TODO: improve discriminator to use softmax?
+    transition_context_loss = self._gan_loss(generator_discriminator_out, true_labels)
+    # TODO: do we need to invert the labels because we are not generating noise?
+    # "The generator should be trying to fool the discriminator so when the discriminator
+    # makes a mistake and says the generated output is real (predicts 1) then the gradients
+    # should be small, when the discriminator acts correctly and predicts that the output is
+    # generated (predicts 0) the gradients should be big."
+    transition_context_loss += self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
+    # This loss by itself is too big?
+    transition_context_loss = (transition_context_loss * mask).sum() / mask.sum()
+    # TODO: remove retain_graph here
+    # transition_context_loss.backward(retain_graph=True)
+    # self._generator_optimizer.step()
 
-      # Train discriminator
-      self._discriminator_optimizer.zero_grad()
-      true_discriminator_out = self._discriminator(true_data)
-      true_discriminator_loss = self._gan_loss(true_discriminator_out, true_labels)
-      generator_discriminator_out = self._discriminator(transition_contexts.detach())
-      generator_discriminator_loss = self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
-      # TODO: do we need to invert the labels because we are not generating noise?
-      # generator_discriminator_loss = self._gan_loss(generator_discriminator_out, true_labels)
-      discriminator_loss = (true_discriminator_loss + generator_discriminator_loss) / 2
-      discriminator_loss.backward()
-      # Consider adding this loss to the end to training jointly?
-      # Or at lease used for visualization.
-      self._discriminator_optimizer.step()
+    # Train discriminator
+    self._discriminator_optimizer.zero_grad()
+    true_discriminator_out = self._discriminator(true_data)
+    true_discriminator_loss = self._gan_loss(true_discriminator_out, true_labels)
+    generator_discriminator_out = self._discriminator(transition_contexts.detach())
+    generator_discriminator_loss = self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
+    # TODO: do we need to invert the labels because we are not generating noise?
+    # generator_discriminator_loss = self._gan_loss(generator_discriminator_out, true_labels)
+    discriminator_loss = (true_discriminator_loss + generator_discriminator_loss) / 2
+    discriminator_loss.backward()
+    # Consider adding this loss to the end to training jointly?
+    # Or at lease used for visualization.
+    self._discriminator_optimizer.step()
 
-      cutoff = torch.ones(id_contexts.shape[0]) * 10
-      losses = {
-        "transition_context_loss": transition_context_loss,
-        "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
-        "discriminator_loss": discriminator_loss
-      }
-    else:
-      cutoff = torch.ones(id_contexts.shape[0]) * 10
-      losses = {
-        "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
-      }
+    cutoff = torch.ones(id_contexts.shape[0]) * 10
+    losses = {
+      "transition_context_loss": transition_context_loss,
+      "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
+      "discriminator_loss": discriminator_loss
+    }
     return losses
 
   def forward(self, trajectories):

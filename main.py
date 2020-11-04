@@ -265,7 +265,7 @@ def main():
     # updating the instruction agent
     # When use_ids is true, we use id_contexts + 0.1 * torch.randn_like(id_contexts)
     # for trajectory embedding updates
-    if step > 10000 and step % 2 == 0:
+    if step % 2 == 0:
       trajectory_embedder.use_ids(False)
     episode, _ = run_episode(
         instruction_env, instruction_agent,
