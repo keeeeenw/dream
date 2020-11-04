@@ -258,6 +258,9 @@ class DQNPolicy(nn.Module):
     current_state_q_values, aux_losses = self._Q(states, None)
     if isinstance(aux_losses, dict):
       for name, loss in aux_losses.items():
+        # note that discriminator_loss will be add here for stats but
+        # won't be used for calculating loss.
+        # print(name)
         self._losses[name].append(loss.detach().cpu().data.numpy())
     current_state_q_values = current_state_q_values.gather(
         1, actions.unsqueeze(1))
@@ -275,6 +278,10 @@ class DQNPolicy(nn.Module):
     self._losses["td_error"].append(loss.detach().cpu().data.numpy())
     aux_loss = 0
     if isinstance(aux_losses, dict):
+      if 'discriminator_loss' in aux_losses:
+        del aux_losses['discriminator_loss'] # do not optimize discriminator outside
+      if 'transition_context_loss' in aux_losses:
+        del aux_losses['transition_context_loss'] # do not optimize generator outside
       aux_loss = sum(aux_losses.values())
     return loss + aux_loss
 
@@ -353,19 +360,20 @@ class RecurrentDQNPolicy(DQNPolicy):
     # TODO(evzliu): Could more gracefully handle this by passing a
     # TrajectoryExperience object to label_rewards to take TrajectoryExperience
     # Relabel the rewards on the fly
-    if self._reward_relabeler is not None:
-      trajectories = [seq[0].trajectory for seq in experiences]
-      # (batch_size, max_seq_len)
-      indices = torch.tensor(
-          [[e.index for e in seq] for seq in experiences]).long()
+    # Do not relabel reward for GAN
+    # if self._reward_relabeler is not None:
+    #   trajectories = [seq[0].trajectory for seq in experiences]
+    #   # (batch_size, max_seq_len)
+    #   indices = torch.tensor(
+    #       [[e.index for e in seq] for seq in experiences]).long()
       
-      random_trajectories = None
-      if random_experiences is not None:
-        random_trajectories = [seq[0].trajectory for seq in random_experiences]
+    #   random_trajectories = None
+    #   if random_experiences is not None:
+    #     random_trajectories = [seq[0].trajectory for seq in random_experiences]
 
-      # (batch_size * max_trajectory_len)
-      rewards = self._reward_relabeler.label_rewards(
-          trajectories, random_trajectories)[0].gather(-1, indices).reshape(-1)
+    #   # (batch_size * max_trajectory_len)
+    #   rewards = self._reward_relabeler.label_rewards(
+    #       trajectories, random_trajectories)[0].gather(-1, indices).reshape(-1)
 
     # (batch_size,) 1 if was not done, otherwise 0
     not_done_mask = ~(torch.tensor(

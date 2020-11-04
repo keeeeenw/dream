@@ -261,7 +261,11 @@ def main():
     instruction_env = env_class.instruction_wrapper()(
         exploration_env, exploration_episode, seed=step + 1)
 
-    if step % 2 == 0:
+    # Alternate between use_ids False and use_ids True for
+    # updating the instruction agent
+    # When use_ids is true, we use id_contexts + 0.1 * torch.randn_like(id_contexts)
+    # for trajectory embedding updates
+    if step > 10000 and step % 2 == 0:
       trajectory_embedder.use_ids(False)
     episode, _ = run_episode(
         instruction_env, instruction_agent,
@@ -317,7 +321,7 @@ def main():
 
       test_rewards = []
       test_exploration_lengths = []
-      trajectory_embedder.use_ids(False)
+      trajectory_embedder.use_ids(False) # do not use real task embedding for testing
       for test_index in tqdm.tqdm(range(100)):
         exploration_env = create_env(test_index, test=True)
         exploration_episode, exploration_render = run_episode(
