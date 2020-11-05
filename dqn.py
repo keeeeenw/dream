@@ -280,8 +280,6 @@ class DQNPolicy(nn.Module):
     if isinstance(aux_losses, dict):
       if 'discriminator_loss' in aux_losses:
         del aux_losses['discriminator_loss'] # do not optimize discriminator outside
-      if 'transition_context_loss' in aux_losses:
-        del aux_losses['transition_context_loss'] # do not optimize generator outside
       aux_loss = sum(aux_losses.values())
     return loss + aux_loss
 
