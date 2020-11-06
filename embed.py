@@ -10,6 +10,63 @@ from envs import grid
 import relabel
 import utils
 
+def bce_loss(input, target):
+    """
+    Numerically stable version of the binary cross-entropy loss function.
+
+    As per https://github.com/pytorch/pytorch/issues/751
+    See the TensorFlow docs for a derivation of this formula:
+    https://www.tensorflow.org/api_docs/python/tf/nn/sigmoid_cross_entropy_with_logits
+
+    Inputs:
+    - input: PyTorch Tensor of shape (N, ) giving scores.
+    - target: PyTorch Tensor of shape (N,) containing 0 and 1 giving targets.
+
+    Returns:
+    - A PyTorch Tensor containing the mean BCE loss over the minibatch of input data.
+    """
+    neg_abs = - input.abs()
+    loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
+    return loss.mean()
+
+def ls_discriminator_loss(scores_real, scores_fake):
+    """
+    Compute the Least-Squares GAN loss for the discriminator.
+    
+    Inputs:
+    - scores_real: PyTorch Tensor of shape (N,) giving scores for the real data.
+    - scores_fake: PyTorch Tensor of shape (N,) giving scores for the fake data.
+    
+    Outputs:
+    - loss: A PyTorch Tensor containing the loss.
+    """
+    loss = None
+    # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+
+    loss_dx = torch.mean(torch.pow(scores_real - 1, 2))
+    loss_dgz = torch.mean(torch.pow(scores_fake, 2))
+    loss = 1/2 * loss_dx + 1/2 * loss_dgz
+
+    # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    return loss
+
+def ls_generator_loss(scores_fake):
+    """
+    Computes the Least-Squares GAN loss for the generator.
+    
+    Inputs:
+    - scores_fake: PyTorch Tensor of shape (N,) giving scores for the fake data.
+    
+    Outputs:
+    - loss: A PyTorch Tensor containing the loss.
+    """
+    loss = None
+    # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+
+    loss = 1/2 * torch.mean(torch.pow(scores_fake - 1, 2))
+
+    # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    return loss
 
 class Embedder(abc.ABC, nn.Module):
   """Defines the embedding of an object in the forward method.
@@ -111,24 +168,46 @@ class TransitionEmbedder(Embedder):
 class Discriminator(nn.Module):
   def __init__(self, input_length: int):
     super(Discriminator, self).__init__()
-    self.dense1 = nn.Linear(int(input_length), int(input_length));
-    self.activation1 = nn.Sigmoid()
-    self.dropout1 = nn.Dropout()
-    self.dense2 = nn.Linear(int(input_length), int(input_length));
-    self.activation2 = nn.Sigmoid()
-    self.dropout2 = nn.Dropout()
-    self.dense3 = nn.Linear(int(input_length), 1);
-    self.activation3 = nn.Sigmoid()
+    # self.dense1 = nn.Linear(int(input_length), int(input_length));
+    # self.activation1 = nn.LeakyReLU(0.01)
+    # self.dropout1 = nn.Dropout()
+    # self.dense2 = nn.Linear(int(input_length), int(input_length));
+    # self.activation2 = nn.LeakyReLU(0.01)
+    # self.dropout2 = nn.Dropout()
+    # self.dense3 = nn.Linear(int(input_length), 1);
+    # input_length should be 64
+    self.layer1 = nn.Conv1d(int(input_length), 128, kernel_size=1)
+    self.bn1 = nn.BatchNorm1d(128)
+    self.activation1 = nn.LeakyReLU(0.01)
+    self.layer2 = nn.Conv1d(128, 256, kernel_size=1)
+    self.bn2 = nn.BatchNorm1d(256)
+    self.activation2 = nn.LeakyReLU(0.01)
+    self.layer3 = nn.Conv1d(256, 256, kernel_size=1)
+    self.bn3 = nn.BatchNorm1d(256)
+    self.activation3 = nn.LeakyReLU(0.01)
+    self.layer4 = nn.Conv1d(256, int(input_length), kernel_size=1)
 
   def forward(self, x):
-    x = self.dense1(x)
+    # x = self.dense1(x)
+    # x = self.activation1(x)
+    # x = self.dropout1(x)
+    # x = self.dense2(x)
+    # x = self.activation2(x)
+    # x = self.dropout2(x)
+    # x = self.dense3(x)
+    # Example 1 inputs all_transition_contexts torch.Size([32, 11, 64])
+    # Example 2 inputs all_transition_contexts torch.Size([1, 4, 64])
+    x = x.transpose(1, 2) # channel first
+    x = self.layer1(x)
+    x = self.bn1(x)
     x = self.activation1(x)
-    x = self.dropout1(x)
-    x = self.dense2(x)
+    x = self.layer2(x)
+    x = self.bn2(x)
     x = self.activation2(x)
-    x = self.dropout2(x)
-    x = self.dense3(x)
+    x = self.layer3(x)
+    x = self.bn3(x)
     x = self.activation3(x)
+    x = self.layer4(x)
     return x
 
 class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
@@ -144,14 +223,13 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     self._use_ids = True
 
     self._discriminator = Discriminator(transition_embedder.embed_dim)
-    self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.0001)
-    # gen_params = list(self._transition_embedder.parameters()) + \
-    #   list(self._transition_lstm.parameters()) + \
-    #   list(self._transition_fc_layer.parameters()) + \
-    #   list(self._transition_output_layer.parameters())
-    # self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.0001)
+    self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=1e-3, betas=(0.5, 0.999))
+    gen_params = list(self._transition_embedder.parameters()) + \
+      list(self._transition_lstm.parameters()) + \
+      list(self._transition_fc_layer.parameters()) + \
+      list(self._transition_output_layer.parameters())
+    self._generator_optimizer = torch.optim.Adam(gen_params, lr=1e-3, betas=(0.5, 0.999))
     self._random_trajectories = None
-    self._gan_loss = nn.BCELoss()
 
   def use_ids(self, use):
     self._use_ids = use
@@ -249,11 +327,13 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # variance N(μω(τexp),σ2I), this loss reduces to an l2 regression of z on μω(τexp)
     # all_transition_contexts -> trajectory embedding
     # id_contexts -> task encoding
-    transition_context_loss = (
-        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-         all_transition_contexts).detach()) ** 2).sum(-1)
-    transition_context_loss = (
-        transition_context_loss * mask).sum() / mask.sum()
+
+    # Uncomment here for the original loss
+    # transition_context_loss = (
+    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+    #      all_transition_contexts).detach()) ** 2).sum(-1)
+    # transition_context_loss = (
+    #     transition_context_loss * mask).sum() / mask.sum()
 
     # GAN implemenation
     # Option 1
@@ -268,71 +348,50 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # Generator: TrajectoryEmbedder qω(z|τexp): given trajectories predict Z embedding
     # Discriminator: given predicted Z embedding, predict whether or not it is real. This needs to be a new model.
     # This step assumes we have already trained Fψ(z|μ) to have good task representation
-    # I don't think _instruction_embedder Fψ is the dsciriminator in this case? Or is that the generator?
-    # Or is it the true label because we want to bring Fψ(u) closer to qω(z|τexp).
 
-    # GAN implemenation
-    # Challenge:
-    # Create random trajectories, which is list of list of experience
-    # Can this be trajectory generated by random policy?
-    # batch_size = len(trajectories_tmp)[0]
-    # dim = len(trajectories_tmp[0])
-    # noise = []
-    # for _ in range(batch_size):
-    #   trajectory = []
-    #   for _ in range(dim):
-    #     trajectory.append()
-
-    # trajectories_sizes = trajectories_tmp.size() # this will not work
-    # noise = torch.randn(trajectories_sizes) # TODO: use gaussian noise
-
-    # Using random trajectories to generate noise
+    # TODO: using random trajectories to generate noise
     # noise = self._random_trajectories
     # id_contexts, _, generated_data, _ = (self._compute_contexts(noise))
 
     # Train the generator
-    #   torch.tensor([traj[0].state.env_id for traj in trajectories_tmp])) # come from Fψ(u)
     # TODO: is id_contexts the true label though because we are also training F.
-    true_data = id_contexts.detach() # come from Fψ(u)
-    true_labels = [1] * batch_size
-    true_labels = torch.tensor(true_labels).float()[:,None]
-    # transition_contexts torch.Size([1, 64])
-    # self._generator_optimizer.zero_grad()
-    generator_discriminator_out = self._discriminator(transition_contexts)
-    # TODO: all_transition_contexts torch.Size([1, 3, 64]) we need to expand the input of discriminator
-    # generator_discriminator_out = self._discriminator(all_transition_contexts)
-    # TODO: improve discriminator to use softmax?
-    transition_context_loss_gan = self._gan_loss(generator_discriminator_out, true_labels)
-    # TODO: do we need to invert the labels because we are not generating noise?
-    # "The generator should be trying to fool the discriminator so when the discriminator
-    # makes a mistake and says the generated output is real (predicts 1) then the gradients
-    # should be small, when the discriminator acts correctly and predicts that the output is
-    # generated (predicts 0) the gradients should be big."
-    # transition_context_loss_gan = self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
-    transition_context_loss += (transition_context_loss_gan * mask).sum() / mask.sum()
-    # TODO: remove retain_graph here
-    # transition_context_loss.backward(retain_graph=True)
-    # self._generator_optimizer.step()
-
-    # Train discriminator
+    true_data = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
     self._discriminator_optimizer.zero_grad()
-    true_discriminator_out = self._discriminator(true_data)
-    true_discriminator_loss = self._gan_loss(true_discriminator_out, true_labels)
-    generator_discriminator_out = self._discriminator(transition_contexts.detach())
-    generator_discriminator_loss = self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
-    # TODO: do we need to invert the labels because we are not generating noise?
-    # generator_discriminator_loss = self._gan_loss(generator_discriminator_out, true_labels)
-    discriminator_loss = (true_discriminator_loss + generator_discriminator_loss) / 2
-    discriminator_loss.backward()
-    # Consider adding this loss to the end to training jointly?
-    # Or at lease used for visualization.
+    logits_real = self._discriminator(2 * (true_data - 0.5))
+    fake_embedding = all_transition_contexts.detach()
+    logits_fake = self._discriminator(fake_embedding)
+
+    d_total_error = ls_discriminator_loss(logits_real, logits_fake)
+    d_total_error.backward()
     self._discriminator_optimizer.step()
+
+    self._generator_optimizer.zero_grad()
+    fake_embedding = all_transition_contexts # use the tranistion contexts graph now
+    gen_logits_fake = self._discriminator(all_transition_contexts)
+    g_error = ls_generator_loss(gen_logits_fake)
+    # # TODO: remove retain_graph here
+    g_error.backward(retain_graph=True)
+    self._generator_optimizer.step()
+
+    discriminator_loss = d_total_error
+    generator_loss = g_error
+
+    # # TODO: all_transition_contexts torch.Size([1, 3, 64]) we need to expand the input of discriminator
+    # # TODO: do we need to invert the labels because we are not generating noise?
+    # # "The generator should be trying to fool the discriminator so when the discriminator
+    # # makes a mistake and says the generated output is real (predicts 1) then the gradients
+    # # should be small, when the discriminator acts correctly and predicts that the output is
+    # # generated (predicts 0) the gradients should be big."
+    # # transition_context_loss_gan = self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
+    # transition_context_loss += (transition_context_loss_gan * mask).sum() / mask.sum()
+    # # transition_context_loss.backward(retain_graph=True)
 
     cutoff = torch.ones(id_contexts.shape[0]) * 10
     losses = {
-      "transition_context_loss": transition_context_loss,
+      # "transition_context_loss": transition_context_loss,
+      "generator_loss": generator_loss, # only used for stats
       "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
-      "discriminator_loss": discriminator_loss
+      "discriminator_loss": discriminator_loss # only used for stats
     }
     return losses
 
