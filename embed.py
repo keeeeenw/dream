@@ -223,12 +223,12 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     self._use_ids = True
 
     self._discriminator = Discriminator(transition_embedder.embed_dim)
-    self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.005, betas=(0.5, 0.999))
+    self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.0005, betas=(0.5, 0.999))
     gen_params = list(self._transition_embedder.parameters()) + \
       list(self._transition_lstm.parameters()) + \
       list(self._transition_fc_layer.parameters()) + \
       list(self._transition_output_layer.parameters())
-    self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.005, betas=(0.5, 0.999))
+    self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.0005, betas=(0.5, 0.999))
     self._random_trajectories = None
 
   def use_ids(self, use):
