@@ -223,12 +223,12 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     self._use_ids = True
 
     self._discriminator = Discriminator(transition_embedder.embed_dim)
-    self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.0005, betas=(0.5, 0.999))
-    gen_params = list(self._transition_embedder.parameters()) + \
-      list(self._transition_lstm.parameters()) + \
-      list(self._transition_fc_layer.parameters()) + \
-      list(self._transition_output_layer.parameters())
-    self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.0005, betas=(0.5, 0.999))
+    self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
+    # gen_params = list(self._transition_embedder.parameters()) + \
+    #   list(self._transition_lstm.parameters()) + \
+    #   list(self._transition_fc_layer.parameters()) + \
+    #   list(self._transition_output_layer.parameters())
+    # self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.001, betas=(0.5, 0.999))
     self._random_trajectories = None
 
   def use_ids(self, use):
@@ -353,7 +353,10 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # noise = self._random_trajectories
     # id_contexts, _, generated_data, _ = (self._compute_contexts(noise))
 
-    # Train the generator
+    # enable discriminator updates inside of this function
+    for param in self._discriminator.parameters():
+      param.requires_grad = True
+
     # TODO: is id_contexts the true label though because we are also training F.
     true_data = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
     self._discriminator_optimizer.zero_grad()
@@ -365,13 +368,18 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     d_total_error.backward()
     self._discriminator_optimizer.step()
 
-    self._generator_optimizer.zero_grad()
+    # disable discriminator updates outside of this function
+    for param in self._discriminator.parameters():
+      param.requires_grad = False
+
+    # Train the generator
+    # self._generator_optimizer.zero_grad()
     fake_embedding = all_transition_contexts # use the tranistion contexts graph now
     gen_logits_fake = self._discriminator(all_transition_contexts)
     g_error = ls_generator_loss(gen_logits_fake)
     # # TODO: remove retain_graph here
-    g_error.backward(retain_graph=True)
-    self._generator_optimizer.step()
+    # g_error.backward(retain_graph=True)
+    # self._generator_optimizer.step()
 
     discriminator_loss = d_total_error
     generator_loss = g_error
@@ -389,7 +397,8 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     cutoff = torch.ones(id_contexts.shape[0]) * 10
     losses = {
       # "transition_context_loss": transition_context_loss,
-      "generator_loss": generator_loss, # only used for stats
+      "transition_context_loss": generator_loss,
+      # "generator_loss": generator_loss, # only used for stats
       "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
       "discriminator_loss": discriminator_loss # only used for stats
     }
