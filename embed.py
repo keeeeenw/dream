@@ -376,10 +376,10 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
       param.requires_grad = True
 
     # TODO: is id_contexts the true label though because we are also training F.
-    true_data = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
+    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
+    true_data = all_transition_contexts.detach()
     # self._discriminator_optimizer.zero_grad()
     logits_real = self._discriminator(2 * (true_data - 0.5))
-    fake_embedding = all_transition_contexts.detach()
     logits_fake = self._discriminator(fake_embedding)
 
     d_total_error = ls_discriminator_loss(logits_real, logits_fake)
@@ -391,7 +391,7 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
 
     # Train the generator
     # self._generator_optimizer.zero_grad()
-    fake_embedding = all_transition_contexts # use the tranistion contexts graph now
+    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts) # use the tranistion contexts graph now
     gen_logits_fake = self._discriminator(fake_embedding)
     g_error = ls_generator_loss(gen_logits_fake)
     # TODO: remove retain_graph here
@@ -470,18 +470,18 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # This will be used later by GAN to generate noise
     self._random_trajectories = random_trajectories
 
-    # # Training exploration parameters using Q-learning. No gradient required here.
-    # # Compute information gain from the additional step and use it
-    # # as reward which will be used for regular Q-learning.
-    # # Basically all_transition_contexts is the q_w in the equation.
-    # distances = (
-    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-    #      all_transition_contexts).detach()) ** 2).sum(-1)
+    # Training exploration parameters using Q-learning. No gradient required here.
+    # Compute information gain from the additional step and use it
+    # as reward which will be used for regular Q-learning.
+    # Basically all_transition_contexts is the q_w in the equation.
+    distances = (
+        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+         all_transition_contexts).detach()) ** 2).sum(-1)
     
-    # replace the distance here with the generator loss?
-    gen_logits_fake = self._discriminator(all_transition_contexts)
-    # TODO: double check the loss if correct because we did transpose
-    distances = ls_generator_loss_no_mean(gen_logits_fake).transpose(2, 1).sum(-1)
+    # # replace the distance here with the generator loss?
+    # gen_logits_fake = self._discriminator(all_transition_contexts)
+    # # TODO: double check the loss if correct because we did transpose
+    # distances = ls_generator_loss_no_mean(gen_logits_fake).transpose(2, 1).sum(-1)
 
     # Add penalty
     rewards = distances[:, :-1] - distances[:, 1:] - self._penalty

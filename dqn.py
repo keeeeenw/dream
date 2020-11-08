@@ -389,6 +389,8 @@ class RecurrentDQNPolicy(DQNPolicy):
       if random_experiences is not None:
         random_trajectories = [seq[0].trajectory for seq in random_experiences]
 
+      # TODO: This line clearly won't work, is this block even used?
+      # exploration policy does not have reward relabeler.
       # (batch_size * max_trajectory_len)
       rewards = self._reward_relabeler.label_rewards(
           trajectories, random_trajectories)[0].gather(-1, indices).reshape(-1)
@@ -413,6 +415,7 @@ class RecurrentDQNPolicy(DQNPolicy):
     if hasattr(self._Q._state_embedder, "aux_loss"):
       aux_losses = self._Q._state_embedder.aux_loss(unpadded_experiences)
       if isinstance(aux_losses, dict):
+        # TODO: is this ever invoked? The print statement never worked for me
         for name, loss in aux_losses.items():
           if 'discriminator_loss' == name:
             print('discriminator loss detected')
