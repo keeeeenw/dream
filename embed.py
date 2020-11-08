@@ -68,6 +68,19 @@ def ls_generator_loss(scores_fake):
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return loss
 
+def ls_generator_loss_no_mean(scores_fake):
+    """
+    Computes the Least-Squares GAN loss for the generator.
+    
+    Inputs:
+    - scores_fake: PyTorch Tensor of shape (N,) giving scores for the fake data.
+    
+    Outputs:
+    - loss: A PyTorch Tensor containing the loss.
+    """
+    loss = 1/2 * torch.pow(scores_fake - 1, 2)
+    return loss
+
 class Embedder(abc.ABC, nn.Module):
   """Defines the embedding of an object in the forward method.
 
@@ -210,6 +223,7 @@ class Discriminator(nn.Module):
     x = self.layer4(x)
     return x
 
+
 class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
   def __init__(self, transition_embedder, id_embedder, penalty, embed_dim):
     super().__init__(embed_dim)
@@ -223,13 +237,16 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     self._use_ids = True
 
     self._discriminator = Discriminator(transition_embedder.embed_dim)
-    self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
+    # self._discriminator_optimizer = torch.optim.Adam(self._discriminator.parameters(), lr=0.001, betas=(0.5, 0.999))
     # gen_params = list(self._transition_embedder.parameters()) + \
     #   list(self._transition_lstm.parameters()) + \
     #   list(self._transition_fc_layer.parameters()) + \
     #   list(self._transition_output_layer.parameters())
     # self._generator_optimizer = torch.optim.Adam(gen_params, lr=0.001, betas=(0.5, 0.999))
     self._random_trajectories = None
+  
+  def set_discriminator(self, discriminator):
+    self._discriminator = discriminator
 
   def use_ids(self, use):
     self._use_ids = use
@@ -269,7 +286,7 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # Sorted only required for ONNX
     padded_transitions = nn.utils.rnn.pack_padded_sequence(
         transition_embed.reshape(mask.shape[0], mask.shape[1], -1),
-        sequence_lengths, batch_first=True, enforce_sorted=False)
+        sequence_lengths.detach().cpu(), batch_first=True, enforce_sorted=False)
     if torch.cuda.is_available():
       torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
@@ -353,20 +370,20 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # noise = self._random_trajectories
     # id_contexts, _, generated_data, _ = (self._compute_contexts(noise))
 
-    # enable discriminator updates inside of this function
+    # Train the discriminator
+    # enable discriminator updates inside this function
     for param in self._discriminator.parameters():
       param.requires_grad = True
 
     # TODO: is id_contexts the true label though because we are also training F.
     true_data = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
-    self._discriminator_optimizer.zero_grad()
+    # self._discriminator_optimizer.zero_grad()
     logits_real = self._discriminator(2 * (true_data - 0.5))
     fake_embedding = all_transition_contexts.detach()
     logits_fake = self._discriminator(fake_embedding)
 
     d_total_error = ls_discriminator_loss(logits_real, logits_fake)
-    d_total_error.backward()
-    self._discriminator_optimizer.step()
+    # d_total_error.backward(retain_graph=True)
 
     # disable discriminator updates outside of this function
     for param in self._discriminator.parameters():
@@ -375,10 +392,14 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # Train the generator
     # self._generator_optimizer.zero_grad()
     fake_embedding = all_transition_contexts # use the tranistion contexts graph now
-    gen_logits_fake = self._discriminator(all_transition_contexts)
+    gen_logits_fake = self._discriminator(fake_embedding)
     g_error = ls_generator_loss(gen_logits_fake)
-    # # TODO: remove retain_graph here
+    # TODO: remove retain_graph here
     # g_error.backward(retain_graph=True)
+
+    # only call step afterwards
+    # https://discuss.pytorch.org/t/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modified-by-an-inplace-operation-code-worked-in-pytorch-1-2-but-not-in-1-5-after-updating/87327
+    # self._discriminator_optimizer.step()
     # self._generator_optimizer.step()
 
     discriminator_loss = d_total_error
@@ -396,7 +417,7 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
 
     cutoff = torch.ones(id_contexts.shape[0]) * 10
     losses = {
-      # "transition_context_loss": transition_context_loss,
+      # Uncomment here for the original loss
       "transition_context_loss": generator_loss,
       # "generator_loss": generator_loss, # only used for stats
       "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
@@ -449,14 +470,19 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # This will be used later by GAN to generate noise
     self._random_trajectories = random_trajectories
 
-    # Training exploration parameters using Q-learning. No gradient required here.
-    # Compute information gain from the additional step and use it
-    # as reward which will be used for regular Q-learning.
-    # Basically all_transition_contexts is the q_w in the equation.
-    distances = (
-        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-         all_transition_contexts).detach()) ** 2).sum(-1)
-    # TODO: replace the distance here with the generator loss?
+    # # Training exploration parameters using Q-learning. No gradient required here.
+    # # Compute information gain from the additional step and use it
+    # # as reward which will be used for regular Q-learning.
+    # # Basically all_transition_contexts is the q_w in the equation.
+    # distances = (
+    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+    #      all_transition_contexts).detach()) ** 2).sum(-1)
+    
+    # replace the distance here with the generator loss?
+    gen_logits_fake = self._discriminator(all_transition_contexts)
+    # TODO: double check the loss if correct because we did transpose
+    distances = ls_generator_loss_no_mean(gen_logits_fake).transpose(2, 1).sum(-1)
+
     # Add penalty
     rewards = distances[:, :-1] - distances[:, 1:] - self._penalty
     return (rewards * mask[:, 1:]).detach(), distances

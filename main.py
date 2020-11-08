@@ -6,6 +6,7 @@ import shutil
 import git
 import numpy as np
 import torch
+from torch import nn
 import tqdm
 
 import config as cfg
@@ -132,7 +133,6 @@ def log_episode(exploration_episode, exploration_rewards, distances, path):
       f.write("=" * 80 + "\n")
       f.write("\n")
 
-
 def main():
   arg_parser = argparse.ArgumentParser()
   arg_parser.add_argument(
@@ -214,6 +214,10 @@ def main():
   trajectory_embedder = (
       instruction_agent._dqn._Q._state_embedder._trajectory_embedder)
   exploration_agent.set_reward_relabeler(trajectory_embedder)
+
+  # Setup discriminator for GAN model
+  discriminator_optimizer = torch.optim.Adam(trajectory_embedder._discriminator.parameters(), lr=instruction_config.get("learning_rate"))
+  instruction_agent.set_discriminator_optimizer(discriminator_optimizer)
 
   # Due to the above hack, the trajectory embedder is being loaded twice.
   if args.checkpoint is not None:
