@@ -46,6 +46,7 @@ class DQNAgent(object):
     self._update_freq = update_freq
     self._max_grad_norm = max_grad_norm
     self._updates = 0
+    self._discriminator_optimizer = None
 
     self._losses = collections.deque(maxlen=100)
     self._grad_norms = collections.deque(maxlen=100)
@@ -63,7 +64,7 @@ class DQNAgent(object):
         experiences = self._replay_buffer.sample(self._batch_size)
 
         self._optimizer.zero_grad()
-        loss = self._dqn.loss(experiences, np.ones(self._batch_size), random_experience)
+        loss, discriminator_loss = self._dqn.loss(experiences, np.ones(self._batch_size), random_experience)
         loss.backward()
         self._losses.append(loss.item())
 
@@ -72,6 +73,12 @@ class DQNAgent(object):
             self._dqn.parameters(), self._max_grad_norm, norm_type=2)
         self._grad_norms.append(grad_norm)
         self._optimizer.step()
+  
+        # shared by exploration agent so we need to check
+        if discriminator_loss is not None:
+          self._discriminator_optimizer.zero_grad()
+          discriminator_loss.backward()
+          self._discriminator_optimizer.step()
 
       if self._updates % self._sync_freq == 0:
         self._dqn.sync_target()
@@ -95,7 +102,15 @@ class DQNAgent(object):
     def mean_with_default(l, default):
       if len(l) == 0:
         return default
-      return np.mean(l)
+      
+      float_l = []
+      for item in l:
+        if (torch.is_tensor(item)):
+          float_l.append(item.detach().cpu().numpy())
+        else:
+          float_l.append(item)
+      
+      return np.mean(float_l)
 
     stats = self._dqn.stats
     stats["loss"] = mean_with_default(self._losses, None)
@@ -136,7 +151,9 @@ class DQNAgent(object):
   def set_reward_relabeler(self, reward_relabeler):
     """See DQNPolicy.reward_relabeler."""
     self._dqn.set_reward_relabeler(reward_relabeler)
-
+  
+  def set_discriminator_optimizer(self, discriminator_optimizer):
+    self._discriminator_optimizer = discriminator_optimizer
 
 # TODO(evzliu): Add Policy base class
 class DQNPolicy(nn.Module):
@@ -277,13 +294,15 @@ class DQNPolicy(nn.Module):
     loss = torch.mean((td_error ** 2) * weights)
     self._losses["td_error"].append(loss.detach().cpu().data.numpy())
     aux_loss = 0
+    discriminator_loss = None
     if isinstance(aux_losses, dict):
       if 'discriminator_loss' in aux_losses:
+        discriminator_loss = aux_losses['discriminator_loss']
         del aux_losses['discriminator_loss'] # do not optimize discriminator outside
       if 'generator_loss' in aux_losses:
         del aux_losses['generator_loss'] # do not optimize generator outside
       aux_loss = sum(aux_losses.values())
-    return loss + aux_loss
+    return loss + aux_loss, discriminator_loss
 
   def sync_target(self):
     """Syncs the target Q values with the current Q values"""
@@ -301,7 +320,7 @@ class DQNPolicy(nn.Module):
     if self._reward_relabeler is not None:
       raise ValueError("Reward relabeler already set.")
     self._reward_relabeler = reward_relabeler
-
+  
   @property
   def stats(self):
     """See comments in constructor for more details about what these stats
@@ -389,12 +408,17 @@ class RecurrentDQNPolicy(DQNPolicy):
     # TODO(evzliu): Could more gracefully incorporate aux_losses
     # Hence, we maximize this by training the exploration policy on rewards set to be the information gain
     # Equation (5) ?
+    discriminator_loss = None
     aux_losses = {}
     if hasattr(self._Q._state_embedder, "aux_loss"):
       aux_losses = self._Q._state_embedder.aux_loss(unpadded_experiences)
       if isinstance(aux_losses, dict):
         for name, loss in aux_losses.items():
-          self._losses[name].append(loss.detach().cpu().data.numpy())
+          if 'discriminator_loss' == name:
+            print('discriminator loss detected')
+            discriminator_loss = loss
+          elif 'generator_loss' != name:
+            self._losses[name].append(loss.detach().cpu().data.numpy())
 
     # DDQN
     next_q_values = q_values[:, 1:, :]
@@ -413,7 +437,7 @@ class RecurrentDQNPolicy(DQNPolicy):
     weights = weights.unsqueeze(1) * mask.float()
     loss = (td_error ** 2).reshape(batch_size, seq_len) * weights
     loss = loss.sum() / mask.sum()  # masked mean
-    return loss + sum(aux_losses.values())
+    return loss + sum(aux_losses.values()), discriminator_loss
 
   def act(self, state, prev_hidden_state=None, test=False):
     """

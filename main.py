@@ -6,6 +6,7 @@ import shutil
 import git
 import numpy as np
 import torch
+from torch import nn
 import tqdm
 
 import config as cfg
@@ -132,7 +133,6 @@ def log_episode(exploration_episode, exploration_rewards, distances, path):
       f.write("=" * 80 + "\n")
       f.write("\n")
 
-
 def main():
   arg_parser = argparse.ArgumentParser()
   arg_parser.add_argument(
@@ -207,13 +207,17 @@ def main():
   exploration_agent = get_exploration_agent(exploration_config, exploration_env)
 
   # GAN noisy trajectory generation agent
-  # random_exploration_config = config.get("random_agent")
-  # random_exploration_agent = get_exploration_agent(random_exploration_config, exploration_env)
+  random_exploration_config = config.get("random_agent")
+  random_exploration_agent = get_exploration_agent(random_exploration_config, exploration_env)
 
   # Should probably expose this more gracefully
   trajectory_embedder = (
       instruction_agent._dqn._Q._state_embedder._trajectory_embedder)
   exploration_agent.set_reward_relabeler(trajectory_embedder)
+
+  # Setup discriminator for GAN model
+  discriminator_optimizer = torch.optim.Adam(trajectory_embedder._discriminator.parameters(), lr=instruction_config.get("learning_rate"))
+  instruction_agent.set_discriminator_optimizer(discriminator_optimizer)
 
   # Due to the above hack, the trajectory embedder is being loaded twice.
   if args.checkpoint is not None:
@@ -230,17 +234,17 @@ def main():
   exploration_steps = 0
   instruction_steps = 0
   for step in tqdm.tqdm(range(1000000)):
-    # # GAN random agent noise generator
-    # # TODO: this will increase the steps
-    # random_env = create_env(step)
-    # random_episode, _ = run_episode(
-    #     # Exploration episode gets ignored
-    #     env_class.instruction_wrapper()(
-    #         random_env, [], seed=max(0, step - 1)),
-    #     random_exploration_agent)
-    # random_experiences = []
-    # for index, exp in enumerate(random_episode):
-    #     random_experiences.append(relabel.TrajectoryExperience(exp, random_episode, index))
+    # GAN random agent noise generator
+    # TODO: this will increase the steps
+    random_env = create_env(step)
+    random_episode, _ = run_episode(
+        # Exploration episode gets ignored
+        env_class.instruction_wrapper()(
+            random_env, [], seed=max(0, step - 1)),
+        random_exploration_agent)
+    random_experiences = []
+    for index, exp in enumerate(random_episode):
+        random_experiences.append(random_episode)
 
     exploration_env = create_env(step)
     exploration_episode, _ = run_episode(
@@ -267,6 +271,7 @@ def main():
     # for trajectory embedding updates
     if step % 2 == 0:
       trajectory_embedder.use_ids(False)
+    trajectory_embedder._random_trajectories = random_experiences
     episode, _ = run_episode(
         instruction_env, instruction_agent,
         experience_observers=[instruction_agent.update])
