@@ -50,6 +50,27 @@ def ls_discriminator_loss(scores_real, scores_fake):
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return loss
 
+def ls_discriminator_loss_no_mean(scores_real, scores_fake):
+    """
+    Compute the Least-Squares GAN loss for the discriminator.
+    
+    Inputs:
+    - scores_real: PyTorch Tensor of shape (N,) giving scores for the real data.
+    - scores_fake: PyTorch Tensor of shape (N,) giving scores for the fake data.
+    
+    Outputs:
+    - loss: A PyTorch Tensor containing the loss.
+    """
+    loss = None
+    # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+
+    loss_dx = torch.pow(scores_real - 1, 2)
+    loss_dgz = torch.pow(scores_fake, 2)
+    loss = 1/2 * loss_dx + 1/2 * loss_dgz
+
+    # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    return loss
+
 def ls_generator_loss(scores_fake):
     """
     Computes the Least-Squares GAN loss for the generator.
@@ -474,14 +495,21 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # Compute information gain from the additional step and use it
     # as reward which will be used for regular Q-learning.
     # Basically all_transition_contexts is the q_w in the equation.
-    distances = (
-        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-         all_transition_contexts).detach()) ** 2).sum(-1)
+    # distances = (
+    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+    #      all_transition_contexts).detach()) ** 2).sum(-1)
     
     # # replace the distance here with the generator loss?
     # gen_logits_fake = self._discriminator(all_transition_contexts)
     # # TODO: double check the loss if correct because we did transpose
     # distances = ls_generator_loss_no_mean(gen_logits_fake).transpose(2, 1).sum(-1)
+
+    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
+    true_data = all_transition_contexts.detach()
+    # self._discriminator_optimizer.zero_grad()
+    logits_real = self._discriminator(2 * (true_data - 0.5))
+    logits_fake = self._discriminator(fake_embedding)
+    distances = ls_discriminator_loss_no_mean(logits_real, logits_fake).transpose(2, 1).sum(-1)
 
     # Add penalty
     rewards = distances[:, :-1] - distances[:, 1:] - self._penalty
