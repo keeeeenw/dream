@@ -50,27 +50,6 @@ def ls_discriminator_loss(scores_real, scores_fake):
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     return loss
 
-def ls_discriminator_loss_no_mean(scores_real, scores_fake):
-    """
-    Compute the Least-Squares GAN loss for the discriminator.
-    
-    Inputs:
-    - scores_real: PyTorch Tensor of shape (N,) giving scores for the real data.
-    - scores_fake: PyTorch Tensor of shape (N,) giving scores for the fake data.
-    
-    Outputs:
-    - loss: A PyTorch Tensor containing the loss.
-    """
-    loss = None
-    # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-    loss_dx = torch.pow(scores_real - 1, 2)
-    loss_dgz = torch.pow(scores_fake, 2)
-    loss = 1/2 * loss_dx + 1/2 * loss_dgz
-
-    # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-    return loss
-
 def ls_generator_loss(scores_fake):
     """
     Computes the Least-Squares GAN loss for the generator.
@@ -495,21 +474,15 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # Compute information gain from the additional step and use it
     # as reward which will be used for regular Q-learning.
     # Basically all_transition_contexts is the q_w in the equation.
-    # distances = (
-    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-    #      all_transition_contexts).detach()) ** 2).sum(-1)
+    distances = (
+        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+         all_transition_contexts).detach()) ** 2).sum(-1)
     
-    # # replace the distance here with the generator loss?
-    # gen_logits_fake = self._discriminator(all_transition_contexts)
-    # # TODO: double check the loss if correct because we did transpose
+    # replace the distance here with the generator loss?
+    # gen_logits_fake = self._discriminator(id_contexts.unsqueeze(1).expand_as(all_transition_contexts))
+    # TODO: double check the loss if correct because we did transpose
+    # this loss might not be correct because id_context input is the same for dim=3
     # distances = ls_generator_loss_no_mean(gen_logits_fake).transpose(2, 1).sum(-1)
-
-    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
-    true_data = all_transition_contexts.detach()
-    # self._discriminator_optimizer.zero_grad()
-    logits_real = self._discriminator(2 * (true_data - 0.5))
-    logits_fake = self._discriminator(fake_embedding)
-    distances = ls_discriminator_loss_no_mean(logits_real, logits_fake).transpose(2, 1).sum(-1)
 
     # Add penalty
     rewards = distances[:, :-1] - distances[:, 1:] - self._penalty
@@ -597,7 +570,10 @@ class InstructionPolicyEmbedder(Embedder):
     transition_embedder = TransitionEmbedder(
         state_embedder, action_embedder, reward_embedder,
         transition_config.get("embed_dim"))
-    id_embedder = IDEmbedder(
+    # id_embedder = IDEmbedder(
+    #     env.observation_space["env_id"].high,
+    #     config.get("transition_embedder").get("embed_dim"))
+    id_embedder = GANIDEmbedder(
         env.observation_space["env_id"].high,
         config.get("transition_embedder").get("embed_dim"))
     if config.get("trajectory_embedder").get("type") == "ours":
@@ -1086,6 +1062,7 @@ class IDEmbedder(Embedder):
     super().__init__(embed_dim)
 
     hidden_size = 32
+    # dim 3 and dim 3 will be used here by default
     self._embedders = nn.ModuleList(
         [nn.Embedding(dim, hidden_size) for dim in observation_space])
     self._fc_layer = nn.Linear(hidden_size * len(observation_space), embed_dim)
@@ -1103,6 +1080,45 @@ class IDEmbedder(Embedder):
     for i in range(tensor.shape[1]):
       embeds.append(self._embedders[i](tensor[:, i]))
     return self._fc_layer(torch.cat(embeds, -1))
+
+class GANIDEmbedder(Embedder):
+  """GAN Embeds N-dim IDs by embedding each component and applying multiple"""
+
+  def __init__(self, observation_space, embed_dim):
+    """Constructs for SimpleGridEnv.
+
+    Args:
+      observation_space (np.array): discrete max limits for each dimension of the
+        state (expects min is 0).
+    """
+    super().__init__(embed_dim)
+
+    hidden_size = 128
+    self._embedders = nn.ModuleList(
+        [nn.Embedding(dim, hidden_size) for dim in observation_space])
+    self._fc_layer1 = nn.Linear(hidden_size * len(observation_space), hidden_size * len(observation_space))
+    self._act1 = nn.ReLU()
+    self._fc_layer2 = nn.Linear(hidden_size * len(observation_space), 64 * len(observation_space))
+    self._act2 = nn.ReLU()
+    self._fc_layer3 = nn.Linear(64 * len(observation_space), embed_dim)
+
+  @classmethod
+  def from_config(cls, config, observation_space):
+    return cls(observation_space, config.get("embed_dim"))
+
+  def forward(self, obs):
+    tensor = obs
+    if len(tensor.shape) == 1:  # 1-d IDs
+      tensor = tensor.unsqueeze(-1)
+
+    embeds = []
+    for i in range(tensor.shape[1]):
+      embeds.append(self._embedders[i](tensor[:, i]))
+    embeds = self._fc_layer1(torch.cat(embeds, -1))
+    embeds = self._act1(embeds)
+    embeds = self._fc_layer2(embeds)
+    embeds = self._act2(embeds)
+    return self._fc_layer3(embeds)
 
 
 class FixedVocabEmbedder(Embedder):
