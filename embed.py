@@ -346,11 +346,11 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # id_contexts -> task encoding
 
     # Uncomment here for the original loss
-    # transition_context_loss = (
-    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-    #      all_transition_contexts).detach()) ** 2).sum(-1)
-    # transition_context_loss = (
-    #     transition_context_loss * mask).sum() / mask.sum()
+    transition_context_loss = (
+        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+         all_transition_contexts).detach()) ** 2).sum(-1)
+    transition_context_loss = (
+        transition_context_loss * mask).sum() / mask.sum()
 
     # GAN implemenation
     # Option 1
@@ -418,8 +418,8 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     cutoff = torch.ones(id_contexts.shape[0]) * 10
     losses = {
       # Uncomment here for the original loss
-      "transition_context_loss": generator_loss,
-      # "generator_loss": generator_loss, # only used for stats
+      "transition_context_loss": transition_context_loss + generator_loss,
+      "generator_loss": generator_loss, # only used for stats
       "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
       "discriminator_loss": discriminator_loss # only used for stats
     }
@@ -570,12 +570,12 @@ class InstructionPolicyEmbedder(Embedder):
     transition_embedder = TransitionEmbedder(
         state_embedder, action_embedder, reward_embedder,
         transition_config.get("embed_dim"))
-    # id_embedder = IDEmbedder(
-    #     env.observation_space["env_id"].high,
-    #     config.get("transition_embedder").get("embed_dim"))
-    id_embedder = GANIDEmbedder(
+    id_embedder = IDEmbedder(
         env.observation_space["env_id"].high,
         config.get("transition_embedder").get("embed_dim"))
+    # id_embedder = GANIDEmbedder(
+    #     env.observation_space["env_id"].high,
+    #     config.get("transition_embedder").get("embed_dim"))
     if config.get("trajectory_embedder").get("type") == "ours":
       trajectory_embedder = TrajectoryEmbedder(
           transition_embedder, id_embedder,
