@@ -346,11 +346,11 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # id_contexts -> task encoding
 
     # Uncomment here for the original loss
-    transition_context_loss = (
-        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-         all_transition_contexts).detach()) ** 2).sum(-1)
-    transition_context_loss = (
-        transition_context_loss * mask).sum() / mask.sum()
+    # transition_context_loss = (
+    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+    #      all_transition_contexts).detach()) ** 2).sum(-1)
+    # transition_context_loss = (
+    #     transition_context_loss * mask).sum() / mask.sum()
 
     # GAN implemenation
     # Option 1
@@ -370,30 +370,30 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # noise = self._random_trajectories
     # id_contexts, _, generated_data, _ = (self._compute_contexts(noise))
 
-    # Train the discriminator
-    # enable discriminator updates inside this function
-    for param in self._discriminator.parameters():
-      param.requires_grad = True
+    # # Train the discriminator
+    # # enable discriminator updates inside this function
+    # for param in self._discriminator.parameters():
+    #   param.requires_grad = True
 
-    # TODO: is id_contexts the true label though because we are also training F.
-    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
-    true_data = all_transition_contexts.detach()
-    # self._discriminator_optimizer.zero_grad()
-    logits_real = self._discriminator(2 * (true_data - 0.5))
-    logits_fake = self._discriminator(fake_embedding)
+    # # TODO: is id_contexts the true label though because we are also training F.
+    # fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
+    # true_data = all_transition_contexts.detach()
+    # # self._discriminator_optimizer.zero_grad()
+    # logits_real = self._discriminator(2 * (true_data - 0.5))
+    # logits_fake = self._discriminator(fake_embedding)
 
-    d_total_error = ls_discriminator_loss(logits_real, logits_fake)
-    # d_total_error.backward(retain_graph=True)
+    # d_total_error = ls_discriminator_loss(logits_real, logits_fake)
+    # # d_total_error.backward(retain_graph=True)
 
-    # disable discriminator updates outside of this function
-    for param in self._discriminator.parameters():
-      param.requires_grad = False
+    # # disable discriminator updates outside of this function
+    # for param in self._discriminator.parameters():
+    #   param.requires_grad = False
 
-    # Train the generator
-    # self._generator_optimizer.zero_grad()
-    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts) # use the tranistion contexts graph now
-    gen_logits_fake = self._discriminator(fake_embedding)
-    g_error = ls_generator_loss(gen_logits_fake)
+    # # Train the generator
+    # # self._generator_optimizer.zero_grad()
+    # fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts) # use the tranistion contexts graph now
+    # gen_logits_fake = self._discriminator(fake_embedding)
+    # g_error = ls_generator_loss(gen_logits_fake)
     # TODO: remove retain_graph here
     # g_error.backward(retain_graph=True)
 
@@ -402,8 +402,8 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # self._discriminator_optimizer.step()
     # self._generator_optimizer.step()
 
-    discriminator_loss = d_total_error
-    generator_loss = g_error
+    # discriminator_loss = d_total_error
+    # generator_loss = g_error
 
     # # TODO: all_transition_contexts torch.Size([1, 3, 64]) we need to expand the input of discriminator
     # # TODO: do we need to invert the labels because we are not generating noise?
@@ -418,10 +418,10 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     cutoff = torch.ones(id_contexts.shape[0]) * 10
     losses = {
       # Uncomment here for the original loss
-      "transition_context_loss": transition_context_loss + generator_loss,
-      "generator_loss": generator_loss, # only used for stats
+      # "transition_context_loss": transition_context_loss + generator_loss,
+      # "generator_loss": generator_loss, # only used for stats
       "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
-      "discriminator_loss": discriminator_loss # only used for stats
+      # "discriminator_loss": discriminator_loss # only used for stats
     }
     return losses
 
