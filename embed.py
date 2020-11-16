@@ -52,7 +52,7 @@ def ls_discriminator_loss(scores_real, scores_fake):
 
 def ls_discriminator_loss_no_mean(scores_real, scores_fake):
     """
-    Compute the Least-Squares GAN loss for the discriminator.
+    Compute the Least-Squares GAN loss for the discriminator without using mean
     
     Inputs:
     - scores_real: PyTorch Tensor of shape (N,) giving scores for the real data.
@@ -91,7 +91,7 @@ def ls_generator_loss(scores_fake):
 
 def ls_generator_loss_no_mean(scores_fake):
     """
-    Computes the Least-Squares GAN loss for the generator.
+    Computes the Least-Squares GAN loss for the generator without using mean
     
     Inputs:
     - scores_fake: PyTorch Tensor of shape (N,) giving scores for the fake data.
@@ -512,7 +512,7 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     logits_real = self._discriminator(2 * (true_data - 0.5))
     logits_fake = self._discriminator(fake_embedding)
     # TODO: log then sum?
-    distances = torch.log(ls_discriminator_loss_no_mean(logits_real, logits_fake).transpose(2, 1).sum(-1))
+    distances = ls_discriminator_loss_no_mean(logits_real, logits_fake).transpose(2, 1).log().sum(-1)
 
     # Add penalty
     rewards = distances[:, :-1] - distances[:, 1:] - self._penalty
