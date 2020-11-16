@@ -202,46 +202,46 @@ class TransitionEmbedder(Embedder):
 class Discriminator(nn.Module):
   def __init__(self, input_length: int):
     super(Discriminator, self).__init__()
-    # self.dense1 = nn.Linear(int(input_length), int(input_length));
-    # self.activation1 = nn.LeakyReLU(0.01)
-    # self.dropout1 = nn.Dropout()
-    # self.dense2 = nn.Linear(int(input_length), int(input_length));
-    # self.activation2 = nn.LeakyReLU(0.01)
-    # self.dropout2 = nn.Dropout()
-    # self.dense3 = nn.Linear(int(input_length), 1);
-    # input_length should be 64
-    self.layer1 = nn.Conv1d(int(input_length), 128, kernel_size=1)
-    self.bn1 = nn.BatchNorm1d(128)
+    self.dense1 = nn.Linear(int(input_length), 128);
     self.activation1 = nn.LeakyReLU(0.01)
-    self.layer2 = nn.Conv1d(128, 256, kernel_size=1)
-    self.bn2 = nn.BatchNorm1d(256)
+    self.dropout1 = nn.Dropout()
+    self.dense2 = nn.Linear(128, 256);
     self.activation2 = nn.LeakyReLU(0.01)
-    self.layer3 = nn.Conv1d(256, 256, kernel_size=1)
-    self.bn3 = nn.BatchNorm1d(256)
-    self.activation3 = nn.LeakyReLU(0.01)
-    self.layer4 = nn.Conv1d(256, int(input_length), kernel_size=1)
+    self.dropout2 = nn.Dropout()
+    self.dense3 = nn.Linear(256, 1);
+    # # input_length should be 64
+    # self.layer1 = nn.Conv1d(int(input_length), 128, kernel_size=1)
+    # self.bn1 = nn.BatchNorm1d(128)
+    # self.activation1 = nn.LeakyReLU(0.01)
+    # self.layer2 = nn.Conv1d(128, 256, kernel_size=1)
+    # self.bn2 = nn.BatchNorm1d(256)
+    # self.activation2 = nn.LeakyReLU(0.01)
+    # self.layer3 = nn.Conv1d(256, 256, kernel_size=1)
+    # self.bn3 = nn.BatchNorm1d(256)
+    # self.activation3 = nn.LeakyReLU(0.01)
+    # self.layer4 = nn.Conv1d(256, int(input_length), kernel_size=1)
 
   def forward(self, x):
-    # x = self.dense1(x)
-    # x = self.activation1(x)
-    # x = self.dropout1(x)
-    # x = self.dense2(x)
-    # x = self.activation2(x)
-    # x = self.dropout2(x)
-    # x = self.dense3(x)
+    x = self.dense1(x)
+    x = self.activation1(x)
+    x = self.dropout1(x)
+    x = self.dense2(x)
+    x = self.activation2(x)
+    x = self.dropout2(x)
+    x = self.dense3(x)
     # Example 1 inputs all_transition_contexts torch.Size([32, 11, 64])
     # Example 2 inputs all_transition_contexts torch.Size([1, 4, 64])
-    x = x.transpose(1, 2) # channel first
-    x = self.layer1(x)
-    x = self.bn1(x)
-    x = self.activation1(x)
-    x = self.layer2(x)
-    x = self.bn2(x)
-    x = self.activation2(x)
-    x = self.layer3(x)
-    x = self.bn3(x)
-    x = self.activation3(x)
-    x = self.layer4(x)
+    # x = x.transpose(1, 2) # channel first
+    # x = self.layer1(x)
+    # x = self.bn1(x)
+    # x = self.activation1(x)
+    # x = self.layer2(x)
+    # x = self.bn2(x)
+    # x = self.activation2(x)
+    # x = self.layer3(x)
+    # x = self.bn3(x)
+    # x = self.activation3(x)
+    # x = self.layer4(x)
     return x
 
 
@@ -355,7 +355,7 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     Returns:
       losses (dict(str: torch.FloatTensor)): see forward().
     """
-    batch_size = len(trajectories)
+    _, traj_num, _   = all_transition_contexts.size()
     del trajectories
 
     # The trajectory embedder qω(z|τexp) or g_w in Algorithm 1 maximizing the mutual information
@@ -387,64 +387,40 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # Discriminator: given predicted Z embedding, predict whether or not it is real. This needs to be a new model.
     # This step assumes we have already trained Fψ(z|μ) to have good task representation
 
-    # TODO: using random trajectories to generate noise
-    # noise = self._random_trajectories
-    # id_contexts, _, generated_data, _ = (self._compute_contexts(noise))
-
     # Train the discriminator
     # enable discriminator updates inside this function
     for param in self._discriminator.parameters():
       param.requires_grad = True
 
     # TODO: is id_contexts the true label though because we are also training F.
-    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
-    true_data = all_transition_contexts.detach()
-    # self._discriminator_optimizer.zero_grad()
-    logits_real = self._discriminator(2 * (true_data - 0.5))
-    logits_fake = self._discriminator(fake_embedding)
-
-    d_total_error = ls_discriminator_loss(logits_real, logits_fake)
-    # d_total_error.backward(retain_graph=True)
+    discriminator_loss = 0.0
+    # example size [1, 2, 64]
+    for i in range(traj_num):
+      true_data = all_transition_contexts[:,i,:].squeeze(1).detach()
+      fake_data = id_contexts.detach()
+      logits_real = self._discriminator(2 * (true_data - 0.5))
+      logits_fake = self._discriminator(fake_data)
+      d_total_error = ls_discriminator_loss(logits_real, logits_fake)
+      discriminator_loss += d_total_error
+    discriminator_loss /= traj_num
 
     # disable discriminator updates outside of this function
     for param in self._discriminator.parameters():
       param.requires_grad = False
 
     # Train the generator
-    # self._generator_optimizer.zero_grad()
-    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts) # use the tranistion contexts graph now
+    fake_embedding = id_contexts
     gen_logits_fake = self._discriminator(fake_embedding)
-    g_error = ls_generator_loss(gen_logits_fake)
-    # TODO: remove retain_graph here
-    # g_error.backward(retain_graph=True)
-
-    # only call step afterwards
-    # https://discuss.pytorch.org/t/runtimeerror-one-of-the-variables-needed-for-gradient-computation-has-been-modified-by-an-inplace-operation-code-worked-in-pytorch-1-2-but-not-in-1-5-after-updating/87327
-    # self._discriminator_optimizer.step()
-    # self._generator_optimizer.step()
-
-    discriminator_loss = d_total_error
-    generator_loss = g_error
-
-    # # TODO: all_transition_contexts torch.Size([1, 3, 64]) we need to expand the input of discriminator
-    # # TODO: do we need to invert the labels because we are not generating noise?
-    # # "The generator should be trying to fool the discriminator so when the discriminator
-    # # makes a mistake and says the generated output is real (predicts 1) then the gradients
-    # # should be small, when the discriminator acts correctly and predicts that the output is
-    # # generated (predicts 0) the gradients should be big."
-    # # transition_context_loss_gan = self._gan_loss(generator_discriminator_out, torch.zeros((batch_size, 1)))
-    # transition_context_loss += (transition_context_loss_gan * mask).sum() / mask.sum()
-    # # transition_context_loss.backward(retain_graph=True)
+    generator_loss = ls_generator_loss(gen_logits_fake)
 
     cutoff = torch.ones(id_contexts.shape[0]) * 10
     losses = {
       # Uncomment here for the original loss
-      # "transition_context_loss": transition_context_loss
-      # "transition_context_loss": transition_context_loss + generator_loss,
+      # "transition_context_loss": transition_context_loss,
       "transition_context_loss": generator_loss,
       # "generator_loss": generator_loss, # only used for stats
       "id_context_loss": torch.max((id_contexts ** 2).sum(-1), cutoff).mean(),
-      "discriminator_loss": discriminator_loss
+      "discriminator_loss": discriminator_loss # only used for stats
     }
     return losses
 
@@ -497,22 +473,22 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
     # Compute information gain from the additional step and use it
     # as reward which will be used for regular Q-learning.
     # Basically all_transition_contexts is the q_w in the equation.
-    # distances = (
-    #     (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
-    #      all_transition_contexts).detach()) ** 2).sum(-1)
+    distances = (
+        (all_transition_contexts - id_contexts.unsqueeze(1).expand_as(
+         all_transition_contexts).detach()) ** 2).sum(-1)
     
     # Use generator loss is not correct because shape[1] of id_contexts is repeated
     # gen_logits_fake = self._discriminator(id_contexts.unsqueeze(1).expand_as(all_transition_contexts))
     # this loss might not be correct because id_context input is the same for dim=3
     # distances = ls_generator_loss_no_mean(gen_logits_fake).transpose(2, 1).sum(-1)
 
-    # TODO: consider just run torch.pow(scores_real - 1, 2) here.
-    fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
-    true_data = all_transition_contexts.detach()
-    logits_real = self._discriminator(2 * (true_data - 0.5))
-    logits_fake = self._discriminator(fake_embedding)
-    # TODO: log then sum?
-    distances = ls_discriminator_loss_no_mean(logits_real, logits_fake).transpose(2, 1).log().sum(-1)
+    # # TODO: consider just run torch.pow(scores_real - 1, 2) here.
+    # fake_embedding = id_contexts.unsqueeze(1).expand_as(all_transition_contexts).detach() # come from Fψ(u)
+    # true_data = all_transition_contexts.detach()
+    # logits_real = self._discriminator(2 * (true_data - 0.5))
+    # logits_fake = self._discriminator(fake_embedding)
+    # # TODO: log then sum?
+    # distances = ls_discriminator_loss_no_mean(logits_real, logits_fake).transpose(2, 1).log().sum(-1)
 
     # Add penalty
     rewards = distances[:, :-1] - distances[:, 1:] - self._penalty
