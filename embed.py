@@ -220,6 +220,7 @@ class Discriminator(nn.Module):
     # self.bn3 = nn.BatchNorm1d(256)
     # self.activation3 = nn.LeakyReLU(0.01)
     # self.layer4 = nn.Conv1d(256, int(input_length), kernel_size=1)
+    # TODO: add layer 5 with 1 output channel here
 
   def forward(self, x):
     x = self.dense1(x)
@@ -402,7 +403,7 @@ class TrajectoryEmbedder(Embedder, relabel.RewardLabeler):
       logits_fake = self._discriminator(fake_data)
       d_total_error = ls_discriminator_loss(logits_real, logits_fake)
       discriminator_loss += d_total_error
-    discriminator_loss /= traj_num
+    # discriminator_loss /= traj_num
 
     # disable discriminator updates outside of this function
     for param in self._discriminator.parameters():
