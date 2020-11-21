@@ -203,7 +203,7 @@ class Discriminator(nn.Module):
     self.layer3 = nn.Conv1d(256, 256, kernel_size=1)
     self.bn3 = nn.BatchNorm1d(256)
     self.activation3 = nn.LeakyReLU(0.01)
-    self.layer4 = nn.Conv1d(256, 1, kernel_size=1)
+    self.layer4 = nn.Conv1d(256, 64, kernel_size=1)
 
   def forward(self, x):
     # x = self.dense1(x)
